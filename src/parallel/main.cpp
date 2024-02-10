@@ -16,7 +16,7 @@
 #include <ifaddrs.h>
 #include <unistd.h>
 #include <netinet/in.h>
-
+#define THREAD_LIMIT 128
 using namespace std;
 
 
@@ -26,16 +26,24 @@ struct threadArgs {
   int clientfd;
   static unordered_map<string, string> mymap;
   static pthread_rwlock_t mylock;
-
+  static queue<int> thread_queue;
+  static pthread_mutex_t queuelock;
+  static pthread_cond_t queuecond;
   threadArgs(int clientfd){
     this->clientfd = clientfd;
     pthread_rwlock_init(&(this->mylock), NULL);
+    pthread_mutex_init(&(this->queuelock), NULL);
+    pthread_cond_init(&(this->queuecond), NULL);
+    
   }
 
 };
 
 unordered_map<string, string> threadArgs::mymap;
 pthread_rwlock_t threadArgs::mylock;
+pthread_mutex_t threadArgs::queuelock;
+queue<int> threadArgs::thread_queue;
+pthread_cond_t threadArgs::queuecond;
 
 void error(const char* msg)
 {
@@ -44,8 +52,16 @@ void error(const char* msg)
 }
 void* handleClient(void* mythread_void){
 
-  threadArgs* mythread = (threadArgs*) mythread_void;
-  int clientfd = mythread->clientfd;
+  pthread_mutex_lock(&(threadArgs::queuelock));
+  while((threadArgs::thread_queue).empty()){
+  pthread_cond_wait(&(threadArgs::queuecond), &(threadArgs::queuelock));
+  }
+  threadArgs mythread = threadArgs((threadArgs::thread_queue).front());
+  mythread.thread_queue.pop();
+  pthread_mutex_unlock(&(threadArgs::queuelock));
+
+  
+  int clientfd = mythread.clientfd;
   char buffer[256];
 
   int n = read(clientfd, buffer, 255);
@@ -68,48 +84,48 @@ void* handleClient(void* mythread_void){
 
 
   if(input_command == "WRITE"){
-    pthread_rwlock_wrlock(&(mythread->mylock));
+    pthread_rwlock_wrlock(&(mythread.mylock));
 
     inputstr >> input_key;
     inputstr >> input_value;
 
     cout << "Input key is on write " << input_key << " and input_value be " << input_value << endl;
     input_value = input_value.substr(1, sizeof(input_value) - 1);
-    mythread->mymap[input_key] = input_value;
+    mythread.mymap[input_key] = input_value;
     write(clientfd, "FIN\n", 4);
-    pthread_rwlock_unlock(&(mythread->mylock));
+    pthread_rwlock_unlock(&(mythread.mylock));
 
   }
   else if(input_command == "READ")
   {
-    pthread_rwlock_rdlock(&(mythread->mylock));
+    pthread_rwlock_rdlock(&(mythread.mylock));
     inputstr >> input_key;
     cout << "Input key is on read " << input_key << endl;
-    if(mythread->mymap.find(input_key) == mythread->mymap.end())
+    if(mythread.mymap.find(input_key) == mythread.mymap.end())
       write(clientfd, "NULL\n", 5);
     else{
-      write(clientfd, (mythread->mymap[input_key] + "\n").c_str(), (mythread->mymap[input_key]).size() + 1);
+      write(clientfd, (mythread.mymap[input_key] + "\n").c_str(), (mythread.mymap[input_key]).size() + 1);
     }
-    pthread_rwlock_unlock(&(mythread->mylock));
+    pthread_rwlock_unlock(&(mythread.mylock));
   }
   else if(input_command == "COUNT")
   {
-    pthread_rwlock_rdlock(&(mythread->mylock));
-      string size_str = to_string(mythread->mymap.size());
+    pthread_rwlock_rdlock(&(mythread.mylock));
+      string size_str = to_string(mythread.mymap.size());
       write(clientfd, (size_str + "\n").c_str(), (size_str).size() + 1);
-    pthread_rwlock_unlock(&(mythread->mylock));
+    pthread_rwlock_unlock(&(mythread.mylock));
   }
   else if(input_command == "DELETE")
   {
-    pthread_rwlock_wrlock(&(mythread->mylock));
+    pthread_rwlock_wrlock(&(mythread.mylock));
     inputstr >> input_key;
     cout << "Input key is on delete" << input_key << endl;
-    if(mythread->mymap.erase(input_key))
+    if(mythread.mymap.erase(input_key))
       write(clientfd, "FIN\n", 4);
     else{
       write(clientfd, "NULL\n", 5);
     }
-    pthread_rwlock_unlock(&(mythread->mylock));
+    pthread_rwlock_unlock(&(mythread.mylock));
   }
   else if(input_command == "END")
   {
@@ -176,7 +192,12 @@ int main(int argc, char ** argv) {
     error("Error at listening");
   }
 
-socklen_t acceptsize = sizeof(client_sockaddr);
+  socklen_t acceptsize = sizeof(client_sockaddr);
+
+  for(int i = 0; i< THREAD_LIMIT; i++)
+  {
+    pthread_create(NULL, NULL, handleClient, NULL);
+  }
 //4) Accept connection from a client
  while(1)
  { 
@@ -184,13 +205,19 @@ socklen_t acceptsize = sizeof(client_sockaddr);
   if(acceptfd < 0)
   {
     error("Error at accepting connection");
+  
   }
 
-  pthread_t new_client;
-  threadArgs * mythread = new threadArgs(acceptfd);
+  //Pushing acceptfd to the queue
+  pthread_mutex_lock(&(threadArgs::queuelock));
+  threadArgs::thread_queue.push(acceptfd);
+  pthread_cond_signal(&(threadArgs::queuecond));
+  pthread_mutex_unlock(&(threadArgs::queuelock));
+
+
   printf("Creating new thread \n");
 
-  pthread_create(&new_client, NULL, handleClient, (void*)mythread);
+
   // pthread_join(new_client, NULL);
   printf("After joining back \n");
 }
