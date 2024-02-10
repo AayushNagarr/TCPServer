@@ -19,18 +19,33 @@
 
 using namespace std;
 
-unordered_map<string,string> mymap;
 
 
+
+struct threadArgs {
+  int clientfd;
+  static unordered_map<string, string> mymap;
+  static pthread_rwlock_t mylock;
+
+  threadArgs(int clientfd){
+    this->clientfd = clientfd;
+    pthread_rwlock_init(&(this->mylock), NULL);
+  }
+
+};
+
+unordered_map<string, string> threadArgs::mymap;
+pthread_rwlock_t threadArgs::mylock;
 
 void error(const char* msg)
 {
   perror(msg);
   exit(1);
 }
-void* handleClient(void* acceptfd){
+void* handleClient(void* mythread_void){
 
-  int clientfd =  *(int*) acceptfd;
+  threadArgs* mythread = (threadArgs*) mythread_void;
+  int clientfd = mythread->clientfd;
   char buffer[256];
 
   int n = read(clientfd, buffer, 255);
@@ -53,38 +68,48 @@ void* handleClient(void* acceptfd){
 
 
   if(input_command == "WRITE"){
+    pthread_rwlock_wrlock(&(mythread->mylock));
+
     inputstr >> input_key;
     inputstr >> input_value;
 
     cout << "Input key is on write " << input_key << " and input_value be " << input_value << endl;
     input_value = input_value.substr(1, sizeof(input_value) - 1);
-    mymap[input_key] = input_value;
+    mythread->mymap[input_key] = input_value;
     write(clientfd, "FIN\n", 4);
+    pthread_rwlock_unlock(&(mythread->mylock));
+
   }
   else if(input_command == "READ")
   {
+    pthread_rwlock_rdlock(&(mythread->mylock));
     inputstr >> input_key;
     cout << "Input key is on read " << input_key << endl;
-    if(mymap.find(input_key) == mymap.end())
+    if(mythread->mymap.find(input_key) == mythread->mymap.end())
       write(clientfd, "NULL\n", 5);
     else{
-      write(clientfd, (mymap[input_key] + "\n").c_str(), (mymap[input_key]).size() + 1);
+      write(clientfd, (mythread->mymap[input_key] + "\n").c_str(), (mythread->mymap[input_key]).size() + 1);
     }
+    pthread_rwlock_unlock(&(mythread->mylock));
   }
   else if(input_command == "COUNT")
   {
-      string size_str = to_string(mymap.size());
+    pthread_rwlock_rdlock(&(mythread->mylock));
+      string size_str = to_string(mythread->mymap.size());
       write(clientfd, (size_str + "\n").c_str(), (size_str).size() + 1);
+    pthread_rwlock_unlock(&(mythread->mylock));
   }
   else if(input_command == "DELETE")
   {
+    pthread_rwlock_wrlock(&(mythread->mylock));
     inputstr >> input_key;
     cout << "Input key is on delete" << input_key << endl;
-    if(mymap.erase(input_key))
+    if(mythread->mymap.erase(input_key))
       write(clientfd, "FIN\n", 4);
     else{
       write(clientfd, "NULL\n", 5);
     }
+    pthread_rwlock_unlock(&(mythread->mylock));
   }
   else if(input_command == "END")
   {
@@ -101,7 +126,7 @@ void* handleClient(void* acceptfd){
 }
 
 int main(int argc, char ** argv) {
-  
+
   int portno = 8080; /* port to listen on */
   struct sockaddr_in server_sockaddr, client_sockaddr;
   bzero((char *) &server_sockaddr, (socklen_t)sizeof(server_sockaddr));
@@ -162,10 +187,10 @@ socklen_t acceptsize = sizeof(client_sockaddr);
   }
 
   pthread_t new_client;
-  int * clientfd = new int(acceptfd);
+  threadArgs * mythread = new threadArgs(acceptfd);
   printf("Creating new thread \n");
 
-  pthread_create(&new_client, NULL, handleClient, (void*)clientfd);
+  pthread_create(&new_client, NULL, handleClient, (void*)mythread);
   // pthread_join(new_client, NULL);
   printf("After joining back \n");
 }
