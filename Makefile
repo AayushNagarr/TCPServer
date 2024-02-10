@@ -3,7 +3,7 @@ all: serial parallel
 
 test_serial: serial
 	./bin/serial_server 8080 > /dev/null &
-	PARALLEL=0 ./test.sh
+	ENABLE_LOGGING=1 PARALLEL=0 ./test.sh
 	killall serial_server
 
 serial: src/serial/main.cpp
@@ -11,7 +11,7 @@ serial: src/serial/main.cpp
 
 test_parallel: parallel
 	./bin/parallel_server 8080 > /dev/null &
-	PARALLEL=1 ./test.sh
+	ENABLE_LOGGING=1 PARALLEL=1 ./test.sh
 	killall parallel_server
 
 parallel: src/parallel/main.cpp

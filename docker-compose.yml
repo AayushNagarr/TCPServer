@@ -1,0 +1,16 @@
+version: '3'
+services:
+  TCPServer:
+    image: alpine:latest
+    container_name: cpp
+    networks:
+      - my-network
+    volumes:
+      - type: bind
+        source: ./
+        target: /data
+    tty: true
+
+
+networks:
+  my-network:
