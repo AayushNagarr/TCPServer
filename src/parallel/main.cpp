@@ -34,8 +34,11 @@ void* handleClient(void* acceptfd){
   char buffer[256];
 
   int n = read(clientfd, buffer, 255);
-  if(string(buffer).find("END") == -1) error("No end statement. Broken Code");
-
+  if(string(buffer).find("END") == -1) 
+  {
+    close(clientfd);
+    return NULL;
+  }
   // cout << buffer << endl;
 
   stringstream inputstr;
@@ -85,6 +88,7 @@ void* handleClient(void* acceptfd){
   }
   else if(input_command == "END")
   {
+      close(clientfd);
       break;
   }
   else{
