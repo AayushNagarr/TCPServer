@@ -16,21 +16,133 @@
 #include <ifaddrs.h>
 #include <unistd.h>
 #include <netinet/in.h>
-
+#define THREAD_LIMIT 1
 using namespace std;
 
-unordered_map<string,string> mymap;
 
 
+
+struct threadArgs {
+  int clientfd;
+  static unordered_map<string, string> mymap;
+  static pthread_rwlock_t mylock;
+  static queue<int> thread_queue;
+  static pthread_mutex_t queuelock;
+  static pthread_cond_t queuecond;
+  threadArgs(int clientfd){
+    this->clientfd = clientfd;
+    pthread_rwlock_init(&(this->mylock), NULL);
+    pthread_mutex_init(&(this->queuelock), NULL);
+    pthread_cond_init(&(this->queuecond), NULL);
+    
+  }
+
+};
+
+unordered_map<string, string> threadArgs::mymap;
+pthread_rwlock_t threadArgs::mylock;
+pthread_mutex_t threadArgs::queuelock;
+queue<int> threadArgs::thread_queue;
+pthread_cond_t threadArgs::queuecond;
 
 void error(const char* msg)
 {
   perror(msg);
   exit(1);
 }
+void* handleClient(void* mythread_void){
+
+  pthread_mutex_lock(&(threadArgs::queuelock));
+  while((threadArgs::thread_queue).empty()){
+  pthread_cond_wait(&(threadArgs::queuecond), &(threadArgs::queuelock));
+  }
+  threadArgs mythread = threadArgs((threadArgs::thread_queue).front());
+  mythread.thread_queue.pop();
+  pthread_mutex_unlock(&(threadArgs::queuelock));
+
+  
+  int clientfd = mythread.clientfd;
+  char buffer[256];
+
+  int n = read(clientfd, buffer, 255);
+  if(string(buffer).find("END") == -1) 
+  {
+    close(clientfd);
+    return NULL;
+  }
+  // cout << buffer << endl;
+
+  stringstream inputstr;
+  inputstr <<  string(buffer);
+
+  string input_command;
+  string input_key;
+  string input_value;
+  while(true)
+  {
+  inputstr >> input_command;
+
+
+  if(input_command == "WRITE"){
+    pthread_rwlock_wrlock(&(mythread.mylock));
+
+    inputstr >> input_key;
+    inputstr >> input_value;
+
+    cout << "Input key is on write " << input_key << " and input_value be " << input_value << endl;
+    input_value = input_value.substr(1, sizeof(input_value) - 1);
+    mythread.mymap[input_key] = input_value;
+    write(clientfd, "FIN\n", 4);
+    pthread_rwlock_unlock(&(mythread.mylock));
+
+  }
+  else if(input_command == "READ")
+  {
+    pthread_rwlock_rdlock(&(mythread.mylock));
+    inputstr >> input_key;
+    cout << "Input key is on read " << input_key << endl;
+    if(mythread.mymap.find(input_key) == mythread.mymap.end())
+      write(clientfd, "NULL\n", 5);
+    else{
+      write(clientfd, (mythread.mymap[input_key] + "\n").c_str(), (mythread.mymap[input_key]).size() + 1);
+    }
+    pthread_rwlock_unlock(&(mythread.mylock));
+  }
+  else if(input_command == "COUNT")
+  {
+    pthread_rwlock_rdlock(&(mythread.mylock));
+      string size_str = to_string(mythread.mymap.size());
+      write(clientfd, (size_str + "\n").c_str(), (size_str).size() + 1);
+    pthread_rwlock_unlock(&(mythread.mylock));
+  }
+  else if(input_command == "DELETE")
+  {
+    pthread_rwlock_wrlock(&(mythread.mylock));
+    inputstr >> input_key;
+    cout << "Input key is on delete" << input_key << endl;
+    if(mythread.mymap.erase(input_key))
+      write(clientfd, "FIN\n", 4);
+    else{
+      write(clientfd, "NULL\n", 5);
+    }
+    pthread_rwlock_unlock(&(mythread.mylock));
+  }
+  else if(input_command == "END")
+  {
+      close(clientfd);
+      break;
+  }
+  else{
+      error("Invalid Input");
+  }
+  }
+  
+  pthread_exit(NULL);
+  
+}
 
 int main(int argc, char ** argv) {
-  
+
   int portno = 8080; /* port to listen on */
   struct sockaddr_in server_sockaddr, client_sockaddr;
   bzero((char *) &server_sockaddr, (socklen_t)sizeof(server_sockaddr));
@@ -80,81 +192,33 @@ int main(int argc, char ** argv) {
     error("Error at listening");
   }
 
-socklen_t acceptsize = sizeof(client_sockaddr);
+  socklen_t acceptsize = sizeof(client_sockaddr);
+
+  for(int i = 0; i< THREAD_LIMIT; i++)
+  {
+    pthread_create(NULL, NULL, handleClient, NULL);
+  }
 //4) Accept connection from a client
+ while(1)
+ { 
   int acceptfd = accept(serverfd, (struct sockaddr*)&client_sockaddr, &acceptsize);
   if(acceptfd < 0)
   {
     error("Error at accepting connection");
-  }
-
-  char buffer[256];
-
-  int n = read(acceptfd, buffer, 255);
-
-  // cout << buffer << endl;
-
-  stringstream inputstr;
-  inputstr <<  string(buffer);
-
-  string input_command;
-  string input_key;
-  string input_value;
-  while(true)
-  {
-  inputstr >> input_command;
-
-
-  if(input_command == "WRITE"){
-    inputstr >> input_key;
-    inputstr >> input_value;
-
-    cout << "Input key is on write " << input_key << " and input_value be " << input_value << endl;
-    input_value = input_value.substr(1, sizeof(input_value) - 1);
-    mymap[input_key] = input_value;
-    write(acceptfd, "FIN\n", 4);
-  }
-  else if(input_command == "READ")
-  {
-    inputstr >> input_key;
-    cout << "Input key is on read " << input_key << endl;
-    if(mymap.find(input_key) == mymap.end())
-      write(acceptfd, "NULL\n", 5);
-    else{
-      write(acceptfd, (mymap[input_key] + "\n").c_str(), (mymap[input_key]).size() + 1);
-    }
-  }
-  else if(input_command == "COUNT")
-  {
-      string size_str = to_string(mymap.size());
-      write(acceptfd, (size_str + "\n").c_str(), (size_str).size() + 1);
-      write(acceptfd, "\n", 1);
-  }
-  else if(input_command == "DELETE")
-  {
-    inputstr >> input_key;
-    cout << "Input key is on delete" << input_key << endl;
-    if(mymap.erase(input_key))
-      write(acceptfd, "FIN\n", 4);
-    else{
-      write(acceptfd, "NULL\n", 5);
-    }
-  }
-  else if(input_command == "END")
-  {
-      break;
-  }
-  else{
-      error("Invalid Input");
-  }
-  }
-
-
   
+  }
+
+  //Pushing acceptfd to the queue
+  pthread_mutex_lock(&(threadArgs::queuelock));
+  threadArgs::thread_queue.push(acceptfd);
+  pthread_cond_signal(&(threadArgs::queuecond));
+  pthread_mutex_unlock(&(threadArgs::queuelock));
 
 
+  printf("Creating new thread \n");
 
 
-
-
+  // pthread_join(new_client, NULL);
+  printf("After joining back \n");
+}
 }

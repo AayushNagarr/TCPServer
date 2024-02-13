@@ -3,18 +3,20 @@ all: serial parallel
 
 test_serial: serial
 	./bin/serial_server 8080 > /dev/null &
-	ENABLE_LOGGING=1 PARALLEL=0 ./test.sh
+	PARALLEL=0 ./test.sh
 	killall serial_server
 
 serial: src/serial/main.cpp
+	mkdir -p bin
 	g++ -std=c++11 -o bin/serial_server src/serial/main.cpp 
 
 test_parallel: parallel
 	./bin/parallel_server 8080 > /dev/null &
-	ENABLE_LOGGING=1 PARALLEL=1 ./test.sh
+	PARALLEL=1 ./test.sh
 	killall parallel_server
 
 parallel: src/parallel/main.cpp
+	mkdir -p bin
 	g++ -std=c++11 -o bin/parallel_server -pthread -fno-stack-protector src/parallel/main.cpp
 
 clean:
