@@ -1,7 +1,7 @@
 version: '3'
 services:
   TCPServer:
-    image: alpine:latest
+    image: ubuntu:latest
     container_name: cpp
     networks:
       - my-network

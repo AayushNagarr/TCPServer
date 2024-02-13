@@ -20,7 +20,7 @@
 using namespace std;
 
 
-
+  static pthread_cond_t queuecond;
 
 struct threadArgs {
   int clientfd;
@@ -28,12 +28,13 @@ struct threadArgs {
   static pthread_rwlock_t mylock;
   static queue<int> thread_queue;
   static pthread_mutex_t queuelock;
-  static pthread_cond_t queuecond;
+  // static pthread_cond_t queuecond;
   threadArgs(int clientfd){
+    cout << "in constructor" << endl;
     this->clientfd = clientfd;
     pthread_rwlock_init(&(this->mylock), NULL);
     pthread_mutex_init(&(this->queuelock), NULL);
-    pthread_cond_init(&(this->queuecond), NULL);
+    // pthread_cond_init(&(this->queuecond), NULL);
     
   }
 
@@ -43,7 +44,7 @@ unordered_map<string, string> threadArgs::mymap;
 pthread_rwlock_t threadArgs::mylock;
 pthread_mutex_t threadArgs::queuelock;
 queue<int> threadArgs::thread_queue;
-pthread_cond_t threadArgs::queuecond;
+// pthread_cond_t queuecond;
 
 void error(const char* msg)
 {
@@ -54,7 +55,8 @@ void* handleClient(void* mythread_void){
 
   pthread_mutex_lock(&(threadArgs::queuelock));
   while((threadArgs::thread_queue).empty()){
-  pthread_cond_wait(&(threadArgs::queuecond), &(threadArgs::queuelock));
+  pthread_cond_wait(&(queuecond), &(threadArgs::queuelock));
+  cout << "Waiting empty" << endl;
   }
   threadArgs mythread = threadArgs((threadArgs::thread_queue).front());
   mythread.thread_queue.pop();
@@ -98,6 +100,7 @@ void* handleClient(void* mythread_void){
   }
   else if(input_command == "READ")
   {
+     cout << "LOCKING" << endl;
     pthread_rwlock_rdlock(&(mythread.mylock));
     inputstr >> input_key;
     cout << "Input key is on read " << input_key << endl;
@@ -107,6 +110,7 @@ void* handleClient(void* mythread_void){
       write(clientfd, (mythread.mymap[input_key] + "\n").c_str(), (mythread.mymap[input_key]).size() + 1);
     }
     pthread_rwlock_unlock(&(mythread.mylock));
+     cout << "unLOCKING" << endl;
   }
   else if(input_command == "COUNT")
   {
@@ -142,7 +146,11 @@ void* handleClient(void* mythread_void){
 }
 
 int main(int argc, char ** argv) {
+  
+    pthread_cond_init(&(queuecond), NULL);
 
+  threadArgs* test = new threadArgs(0);
+  
   int portno = 8080; /* port to listen on */
   struct sockaddr_in server_sockaddr, client_sockaddr;
   bzero((char *) &server_sockaddr, (socklen_t)sizeof(server_sockaddr));
@@ -196,7 +204,8 @@ int main(int argc, char ** argv) {
 
   for(int i = 0; i< THREAD_LIMIT; i++)
   {
-    pthread_create(NULL, NULL, handleClient, NULL);
+    pthread_t tid;
+    pthread_create(&tid, NULL, handleClient, NULL);
   }
 //4) Accept connection from a client
  while(1)
@@ -210,15 +219,13 @@ int main(int argc, char ** argv) {
 
   //Pushing acceptfd to the queue
   pthread_mutex_lock(&(threadArgs::queuelock));
+  cout << "Locking queue" << endl;
   threadArgs::thread_queue.push(acceptfd);
-  pthread_cond_signal(&(threadArgs::queuecond));
+  pthread_cond_signal(&(queuecond));
   pthread_mutex_unlock(&(threadArgs::queuelock));
 
 
   printf("Creating new thread \n");
 
-
-  // pthread_join(new_client, NULL);
-  printf("After joining back \n");
 }
 }
