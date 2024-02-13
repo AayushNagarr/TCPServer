@@ -196,7 +196,7 @@ int main(int argc, char ** argv) {
 
   for(int i = 0; i< THREAD_LIMIT; i++)
   {
-    int tid;
+    pthread_t tid;
     pthread_create(&tid, NULL, handleClient, NULL);
   }
 //4) Accept connection from a client
