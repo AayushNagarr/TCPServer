@@ -52,7 +52,7 @@ void error(const char* msg)
   exit(1);
 }
 void* handleClient(void* mythread_void){
-
+while(true){
   pthread_mutex_lock(&(threadArgs::queuelock));
   while((threadArgs::thread_queue).empty()){
   pthread_cond_wait(&(queuecond), &(threadArgs::queuelock));
@@ -140,7 +140,7 @@ void* handleClient(void* mythread_void){
       error("Invalid Input");
   }
   }
-  
+  }
   pthread_exit(NULL);
   
 }
