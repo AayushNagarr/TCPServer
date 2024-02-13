@@ -20,7 +20,7 @@
 using namespace std;
 
 
-pthread_cond_t queuecond;
+  // static pthread_cond_t queuecond;
 
 struct threadArgs {
   int clientfd;
@@ -28,13 +28,13 @@ struct threadArgs {
   static pthread_rwlock_t mylock;
   static queue<int> thread_queue;
   static pthread_mutex_t queuelock;
-  // static pthread_cond_t queuecond;
+  static pthread_cond_t queuecond;
   threadArgs(int clientfd){
     cout << "in constructor" << endl;
     this->clientfd = clientfd;
     pthread_rwlock_init(&(this->mylock), NULL);
     pthread_mutex_init(&(this->queuelock), NULL);
-    // pthread_cond_init(&(this->queuecond), NULL);
+    pthread_cond_init(&(this->queuecond), NULL);
     
   }
 
@@ -44,7 +44,7 @@ unordered_map<string, string> threadArgs::mymap;
 pthread_rwlock_t threadArgs::mylock;
 pthread_mutex_t threadArgs::queuelock;
 queue<int> threadArgs::thread_queue;
-// pthread_cond_t queuecond;
+pthread_cond_t threadArgs::queuecond;
 
 void error(const char* msg)
 {
@@ -52,11 +52,10 @@ void error(const char* msg)
   exit(1);
 }
 void* handleClient(void* mythread_void){
-while(true)
-{
+while(true){
   pthread_mutex_lock(&(threadArgs::queuelock));
   while((threadArgs::thread_queue).empty()){
-  pthread_cond_wait(&(queuecond), &(threadArgs::queuelock));
+  pthread_cond_wait(&(threadArgs::queuecond), &(threadArgs::queuelock));
   cout << "Waiting empty" << endl;
   }
   threadArgs mythread = threadArgs((threadArgs::thread_queue).front());
@@ -148,7 +147,7 @@ while(true)
 
 int main(int argc, char ** argv) {
   
-    pthread_cond_init(&(queuecond), NULL);
+    // pthread_cond_init(&(threadArgs::queuecond), NULL);
 
   threadArgs* test = new threadArgs(0);
   
@@ -222,7 +221,7 @@ int main(int argc, char ** argv) {
   pthread_mutex_lock(&(threadArgs::queuelock));
   cout << "Locking queue" << endl;
   threadArgs::thread_queue.push(acceptfd);
-  pthread_cond_signal(&(queuecond));
+  pthread_cond_signal(&(threadArgs::queuecond));
   pthread_mutex_unlock(&(threadArgs::queuelock));
 
 
